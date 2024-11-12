@@ -1,0 +1,14 @@
+{
+    "name": "recast-roblox-test",
+    "tree": {
+        "$className": "DataModel",
+        "ServerScriptService": {
+            "recast-roblox": {
+                "$path": "src"
+            },
+            "recast-roblox-test": {
+                "$path": "test"
+            }
+        }
+    }
+}
