@@ -136,7 +136,10 @@ function NavigationMesh:rasterizeTriangle(p1: Vector3, p2: Vector3, p3: Vector3,
         return
     end
 
-    
+    local zMin = math.clamp((boundLow.Z - self.boundLow.Z) // self.config.heightFieldCellSize,-1,self.heightFieldSize.Y-1);
+	local zMax = math.clamp((boundHigh.Z - self.boundLow.Z) // self.config.heightFieldCellSize,0,self.heightFieldSize.Y-1);
+
+    local currentTriangle = {p1,p2,p3}
 end
 
 function NavigationMesh:markWalkableTriangles(verticies: Types.VertexArray, indicies: Types.IndexArray)

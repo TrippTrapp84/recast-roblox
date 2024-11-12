@@ -3,7 +3,7 @@ local Types = require(Root.types)
 
 local GOLDEN_RATIO = 1.618033988749895
 
-local sphereTesselationResolution = 100
+local sphereTesselationResolution = 0
 local sphereCoordinateLookupVerticies: Types.VertexArray, sphereCoordinateLookupIndicies: Types.IndexArray = {}, {}
 
 local Geometry = {}

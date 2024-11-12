@@ -1,6 +1,6 @@
 local recast = require(script.Parent.Parent["recast-roblox"])
 local geometry = require(script.Parent.Parent["recast-roblox"].util.geometry)
--- local gizmo = require(game.ReplicatedStorage.gizmo)
+local gizmo = require(game.ReplicatedStorage.gizmo)
 
 local sphere = Instance.new("Part")
 sphere.Size = Vector3.one * 10
@@ -28,8 +28,15 @@ for i = 1,#sphereInds // 3 do
     w2.Color = color
 end
 
--- while task.wait() do
---     for i,v in pairs(spherePoints) do
---         gizmo.drawSphere(CFrame.new(v),0.5)
---     end
--- end
+print(sphereInds)
+
+while task.wait() do
+    for i,v in pairs(spherePoints) do
+        gizmo.setColor(Color3.new(1,1,1))
+        -- gizmo.drawSphere(CFrame.new(v),0.5)
+        
+        gizmo.setColor(Color3.new(0,0,0))
+        gizmo.setScale(10)
+        gizmo.drawText(v, tostring(i))
+    end
+end
