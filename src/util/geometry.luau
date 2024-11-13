@@ -3,9 +3,12 @@ local Types = require(Root.types)
 
 local GOLDEN_RATIO = 1.618033988749895
 
-local sphereTesselationResolution = 0
-local sphereCoordinateLookupVerticies: Types.VertexArray, sphereCoordinateLookupIndicies: Types.IndexArray = {}, {}
+local sphereTesselationResolution = 4
+local sphereCoordinateLookupvertices: Types.VertexArray, sphereCoordinateLookupindices: Types.IndexArray = {}, {}
 
+--[=[
+    @class Geometry
+]=]
 local Geometry = {}
 
 local triangleTemplateWedge = Instance.new("Part")
@@ -57,54 +60,213 @@ function Geometry.generateTriangle(p1: Vector3, p2: Vector3, p3: Vector3): (Part
 	return Part1, Part2
 end
 
---[=[
-    @param verticies VertexArray
-    @param indicies IndexArray
-
-    Optimizes a vertex and index array pair to remove duplicate verticies.
-    Operates on `verticies` and `indicies` in-place, so be careful not to accidentally
-    mutate data another part of your program depended on
-]=]
-function Geometry.optimizeArrayPair(verticies: Types.VertexArray, indicies: Types.IndexArray)
-    local indexRemap = {}
+function Geometry.generatePolygon(vertices: Types.VertexArray, indices: Types.IndexArray): {Part}
+    local parts = table.create(math.floor(#indices / 3) * 2)
     
-    for i = #verticies, 2, -1 do
-        local iVert = verticies[i]
-        
-        for j = i-1, 1, -1 do
-            local jVert = verticies[j]
-            if iVert ~= jVert then continue end
+    for i = 1,math.floor(#indices / 3) do
+        local index = i * 3 - 2
 
-            for from,to in pairs(indexRemap) do
-				if to == i then
-					indexRemap[from] = j
-                elseif #verticies == to then
-                    indexRemap[from] = i
-                end
-			end
+        local p1 = vertices[indices[index]]
+        local p2 = vertices[indices[index + 1]]
+        local p3 = vertices[indices[index + 2]]
 
-            indexRemap[#verticies] = i
-            indexRemap[i] = j
-            
-            verticies[i] = verticies[#verticies]
-            table.remove(verticies)
-
-            break
-        end
+        local w1, w2 = Geometry.generateTriangle(p1, p2, p3)
+        table.insert(parts,w1)
+        table.insert(parts,w2)
     end
 
-    for i,v in pairs(indicies) do
-        local remap = indexRemap[v]
-        if not remap then continue end
-        indicies[i] = remap
+    return parts
+end
+
+--[=[
+    @param vertices VertexArray -- The vertices of a convex polygon to generate an `IndexArray` for.
+
+    @return IndexArray -- An index array corresponding to the `vertices`.
+
+    **`NOTE`**: This function only works as intended when given clockwise-winding `VertexArray`s.
+    If you need a winding-independent function, use `makeGuaranteedIndexArray` instead.
+]=]
+function Geometry.makeIndexArray(vertices: Types.VertexArray): Types.IndexArray
+    local indices = table.create((#vertices-2) * 3)
+
+    for i = 2,#vertices-1 do
+        table.insert(indices, 1)
+        table.insert(indices, i)
+        table.insert(indices, i + 1)
+    end
+
+    return indices
+end
+
+--[=[
+    @param vertices VertexArray -- The vertices of a convex polygon to generate an `IndexArray` for.
+
+    @return IndexArray -- An index array corresponding to the `vertices`.
+
+    This function is winding-independent but less performant than `makeIndexArray` as it requires sorting verticies in winding order.
+]=]
+function Geometry.makeGuaranteedIndexArray(vertices: Types.VertexArray): Types.IndexArray
+    local center = Vector3.zero
+    for i,v in pairs(vertices) do
+        center += v
+    end
+    center /= #vertices
+
+    local planeParallel = (vertices[1] - center).Unit
+    local planeNormal = (vertices[1] - center):Cross(vertices[2] - center).Unit
+    
+    local sortedVertices = table.create(#vertices)
+    local vertAngles = table.create(#vertices)
+    for vertInd,v in pairs(vertices) do
+        local offset = (v - center).Unit
+        local angle = offset:Angle(planeParallel, planeNormal)
+
+        local foundIndex = false
+        for i,vertAngle in pairs(vertAngles) do
+            if vertAngle > angle then
+                table.insert(vertAngles, i, angle)
+                table.insert(sortedVertices, i, vertInd)
+
+                foundIndex = true
+                break
+            end
+        end
+
+        if foundIndex then continue end
+        table.insert(vertAngles, angle)
+        table.insert(sortedVertices, vertInd)
+    end
+    
+    local indices = table.create((#vertices-2) * 3)
+
+    for i = 2,#vertices-1 do
+        table.insert(indices, sortedVertices[1])
+        table.insert(indices, sortedVertices[i])
+        table.insert(indices, sortedVertices[i + 1])
+    end
+
+    return indices
+end
+
+--[=[
+    @param vertices VertexArray -- The vertices to divide along the grid axis.
+    @param axis AxisId -- The grid axis to divide on. This is a grid axis for performance reasons, see `dividePolygonOnAxis` for a more general option.
+    @param offset number -- The offset of the axis from the world origin. Think of this as the distance from the origin to the closest point on the axis plane.
+    @param outPoly1 VertexArray -- An output destination for the verticies on the positive distance side of the axis. It is recommended to allocate a table of size `21` for this.
+    @param outPoly2 VertexArray -- An output destination for the verticies on the negative distance side of the axis. It is recommended to allocate a table of size `21` for this.
+]=]
+function Geometry.dividePolygonOnGridAxis(vertices: Types.VertexArray, axis: Types.AxisId, offset: number, outPoly1: Types.VertexArray, outPoly2: Types.VertexArray)
+    --// So I did actually benchmark this, using this outvar system is actually faster because lets you reuse the existing memory, the allocations along trigger a whole
+    --// Host of garbage collection and cache misses. Weird to see in lua? Fair enough, but it's still more performant.
+
+    local deltas: {number} = table.create(#vertices)
+
+    for i,v in ipairs(vertices) do
+        --// Yeah this typecast stupidity is dumb but I do it to avoid linting errors. The correct line would be:
+        --// deltas[i] = offset - v[axis]
+        deltas[i] = offset - ((v :: never) :: {})[axis:: never]
+    end
+
+    local vertex2Ind = #vertices
+    for vertex1Ind, vertex1 in ipairs(vertices) do
+        local sameSide = (deltas[vertex1Ind] >= 0) == (deltas[vertex2Ind] >= 0)
+
+        if sameSide then
+            vertex2Ind = vertex1Ind
+
+            if deltas[vertex1Ind] >= 0 then
+                table.insert(outPoly1,vertex1)
+                if deltas[vertex1Ind] ~= 0 then continue end
+            end
+
+            table.insert(outPoly2,vertex1)
+        else
+            local vertex2 = vertices[vertex2Ind]
+
+            local s = deltas[vertex2Ind] / (deltas[vertex2Ind] - deltas[vertex1Ind])
+            local outVert = vertex2 + (vertex1 - vertex2) * s
+            table.insert(outPoly1,outVert)
+            table.insert(outPoly2,outVert)
+
+            if deltas[vertex1Ind] > 0 then
+                table.insert(outPoly1,vertex1)
+            elseif deltas[vertex1Ind] < 0 then
+                table.insert(outPoly2,vertex1)
+            end
+
+            vertex2Ind = vertex1Ind
+        end
     end
 end
 
-function Geometry.calcBounds(verticies: Types.VertexArray): (Vector3,Vector3)
+--[=[
+    @param vertices VertexArray
+    @param indices IndexArray
+
+    Optimizes a vertex and index array pair to remove duplicate vertices.
+    Operates on `vertices` and `indices` in-place, so be careful not to accidentally
+    mutate data another part of your program depended on
+]=]
+function Geometry.optimizeArrayPair(vertices: Types.VertexArray, indices: Types.IndexArray)
+    local indexRemap = {}
+
+    local vertsSet = {}
+    local verts = {}
+    for i,v in pairs(vertices) do
+        if vertsSet[v] then continue end
+
+        vertsSet[v] = #verts + 1
+        table.insert(verts,v)
+    end
+
+    for i,v in pairs(indices) do
+        local vert = vertices[indices[v]]
+        indices[i] = vertsSet[vert]
+    end
+
+    table.clear(vertices)
+    table.move(verts, 1, #verts, 1,vertices)
+    
+    --// I will come back to reimplement this for performance reasons, but right now
+    --// I cannot make this code function without destroying the mesh data.
+
+    -- for i = #vertices, 2, -1 do
+    --     local iVert = vertices[i]
+        
+    --     for j = i-1, 1, -1 do
+    --         local jVert = vertices[j]
+    --         if iVert ~= jVert then continue end
+
+    --         for from,to in pairs(indexRemap) do
+	-- 			if to == i then
+	-- 				indexRemap[from] = j
+    --             elseif #vertices == to then
+    --                 indexRemap[from] = i
+    --             end
+	-- 		end
+
+    --         indexRemap[#vertices] = i
+    --         indexRemap[i] = j
+            
+    --         vertices[i] = vertices[#vertices]
+    --         table.remove(vertices)
+
+    --         break
+    --     end
+    -- end
+
+    -- for i,v in pairs(indices) do
+    --     local remap = indexRemap[v]
+    --     if not remap then continue end
+    --     indices[i] = remap
+    -- end
+end
+
+function Geometry.calcBounds(vertices: Types.VertexArray): (Vector3,Vector3)
     local boundHigh = Vector3.new(-math.huge,-math.huge,-math.huge)
     local boundLow = Vector3.new(math.huge,math.huge,math.huge)
 
-    for i,v in pairs(verticies) do
+    for i,v in pairs(vertices) do
         boundHigh = boundHigh:Max(v)
         boundLow = boundLow:Min(v)
     end
@@ -181,26 +343,26 @@ end
 --[=[
    @param parts {BasePart} == The parts to unwrap the geometry of.
 
-   @return (VertexArray,IndexArray) -- A vertex and index array containing the verticies (in world space) and the order in which they can be traced to form the shapes.
+   @return (VertexArray,IndexArray) -- A vertex and index array containing the vertices (in world space) and the order in which they can be traced to form the shapes.
 ]=]
 function Geometry.unwrap(parts: {BasePart}): (Types.VertexArray,Types.IndexArray)
-    local verticies: Types.VertexArray = {}
-    local indicies: Types.IndexArray = {}
+    local vertices: Types.VertexArray = {}
+    local indices: Types.IndexArray = {}
     
     for i,v in pairs(parts) do
         local verts, inds = Geometry.unwrapPart(v)
 
-        table.move(verts,1,#verts,#verticies+1,verticies)
-        table.move(inds,1,#inds,#indicies+1,indicies)
+        table.move(verts,1,#verts,#vertices+1,vertices)
+        table.move(inds,1,#inds,#indices+1,indices)
     end
 
-    return verticies, indicies
+    return vertices, indices
 end
 
 --[=[
     @param part BasePart -- The part to unwrap the geometry of.
 
-    @return (VertexArray,IndexArray) -- A vertex and index array containing the verticies (in world space) and the order in which they can be traced to form the shape.
+    @return (VertexArray,IndexArray) -- A vertex and index array containing the vertices (in world space) and the order in which they can be traced to form the shape.
 ]=]
 function Geometry.unwrapPart(part: BasePart): (Types.VertexArray,Types.IndexArray)
     assert(part:IsA("Part"),"Cannot unwrap the geometry of a non-primitive part")
@@ -221,7 +383,7 @@ function Geometry.unwrapPart(part: BasePart): (Types.VertexArray,Types.IndexArra
 end
 
 function Geometry.unwrapSphere(part: Part): (Types.VertexArray,Types.IndexArray)
-    local verts, inds = table.clone(sphereCoordinateLookupVerticies), table.clone(sphereCoordinateLookupIndicies)
+    local verts, inds = table.clone(sphereCoordinateLookupvertices), table.clone(sphereCoordinateLookupindices)
 
     local size = part.Size
     local radius = math.min(size.X,size.Y,size.Z)
@@ -252,7 +414,7 @@ end
 --// We do these down here so that I have my geometry functions already available to use
 do
     local halfGolden = GOLDEN_RATIO/2
-    --// Default points for an icosahedron, we will subdivide along these to generate verticies as needed
+    --// Default points for an icosahedron, we will subdivide along these to generate vertices as needed
     local icoVerts: Types.VertexArray, icoInds: Types.IndexArray = {
         Vector3.new(halfGolden, 0.5, 0), -- 1
         Vector3.new(-halfGolden, 0.5, 0), -- 2
@@ -296,7 +458,7 @@ do
 
     local verts: Types.VertexArray, inds: Types.IndexArray = {}, {}
 
-    for i = 1,#icoInds // 3 do
+    for i = 1,math.floor(#icoInds / 3) do
         local vertexInd = i * 3 - 2
 
         local p1 = icoVerts[icoInds[vertexInd]]
@@ -313,14 +475,14 @@ do
         end
     end
 
-    -- Geometry.optimizeArrayPair(verts, inds)
+    Geometry.optimizeArrayPair(verts, inds)
 
     for i,v in pairs(verts) do
         verts[i] = v.Unit
     end
 
-    sphereCoordinateLookupVerticies = verts
-    sphereCoordinateLookupIndicies = inds
+    sphereCoordinateLookupvertices = verts
+    sphereCoordinateLookupindices = inds
 end
 
 return Geometry

@@ -28,10 +28,10 @@ export type NavigationMesh = {
     config: NavigationMeshConfig,
     walkableThreshold: number,
 
-    calculateBounds: (self: NavigationMesh, verticies: Types.VertexArray, indicies: Types.IndexArray) -> (),
-    markWalkableTriangles: (self: NavigationMesh, verticies: Types.VertexArray, indicies: Types.IndexArray) -> (),
+    calculateBounds: (self: NavigationMesh, vertices: Types.VertexArray, indices: Types.IndexArray) -> (),
+    markWalkableTriangles: (self: NavigationMesh, vertices: Types.VertexArray, indices: Types.IndexArray) -> (),
     clearWalkableTriangles: (self: NavigationMesh) -> (),
-    rasterizeTriangles: (self: NavigationMesh, verticies: Types.VertexArray, indicies: Types.IndexArray) -> (),
+    rasterizeTriangles: (self: NavigationMesh, vertices: Types.VertexArray, indices: Types.IndexArray) -> (),
     rasterizeTriangle: (self : NavigationMesh, p0: Vector3, p1: Vector3, p2: Vector3, areaId: AreaId) -> (),
 }
 export type NavigationMeshConfig = {
@@ -62,13 +62,13 @@ end
 function NavigationMesh.fromParts(parts: {BasePart}, config: NavigationMeshConfig?): NavigationMesh
     local self = NavigationMesh.new(config);
 
-    local verticies, indicies = Geometry.unwrap(parts)
+    local vertices, indices = Geometry.unwrap(parts)
 
-    self:calculateBounds(verticies, indicies)
+    self:calculateBounds(vertices, indices)
 
-    self:markWalkableTriangles(verticies, indicies)
+    self:markWalkableTriangles(vertices, indices)
 
-    self:rasterizeTriangles(verticies, indicies)
+    self:rasterizeTriangles(vertices, indices)
 
     --[[
         // Figure out how big the raster voxel grid will be based on the input geometry bounds.
@@ -113,15 +113,15 @@ function NavigationMesh.fromParts(parts: {BasePart}, config: NavigationMeshConfi
     return self
 end
 
-function NavigationMesh:rasterizeTriangles(verticies: Types.VertexArray, indicies: Types.IndexArray)
+function NavigationMesh:rasterizeTriangles(vertices: Types.VertexArray, indices: Types.IndexArray)
     local self = self :: NavigationMesh
 
-    for i = 1,#indicies // 3 do
+    for i = 1,math.floor(#indices / 3) do
         local vertIndex = i * 3 - 2
         self:rasterizeTriangle(
-            verticies[vertIndex],
-            verticies[vertIndex + 1],
-            verticies[vertIndex + 2],
+            vertices[vertIndex],
+            vertices[vertIndex + 1],
+            vertices[vertIndex + 2],
             self.triAreaIds[i]
         )
     end
@@ -130,32 +130,41 @@ end
 function NavigationMesh:rasterizeTriangle(p1: Vector3, p2: Vector3, p3: Vector3, areaId: AreaId)
     local self = self :: NavigationMesh
 
+    local cellSize = self.config.heightFieldCellSize
+    local hSize = self.heightFieldSize
+    local hBoundHigh = self.boundHigh
+    local hBoundLow = self.boundLow
+
     local boundHigh, boundLow = Geometry.calcBounds({p1,p2,p3})
 
-    if not Geometry.overlapBounds(boundHigh, boundLow, self.boundHigh, self.boundLow) then
+    if not Geometry.overlapBounds(boundHigh, boundLow, hBoundHigh, hBoundLow) then
         return
     end
 
-    local zMin = math.clamp((boundLow.Z - self.boundLow.Z) // self.config.heightFieldCellSize,-1,self.heightFieldSize.Y-1);
-	local zMax = math.clamp((boundHigh.Z - self.boundLow.Z) // self.config.heightFieldCellSize,0,self.heightFieldSize.Y-1);
+    local zMin = math.clamp(math.floor((boundLow.Z - hBoundLow.Z) / cellSize),-1,hSize.Y-1);
+	local zMax = math.clamp(math.floor((boundHigh.Z - hBoundLow.Z) / cellSize),0,hSize.Y-1);
 
     local currentTriangle = {p1,p2,p3}
+
+    for z = zMin, zMax do
+        local cellZ = hBoundLow.Z + z * cellSize
+    end
 end
 
-function NavigationMesh:markWalkableTriangles(verticies: Types.VertexArray, indicies: Types.IndexArray)
+function NavigationMesh:markWalkableTriangles(vertices: Types.VertexArray, indices: Types.IndexArray)
     local self = self :: NavigationMesh
 
     self:clearWalkableTriangles()
     
-    --// We expect that the indicies array's size is a multiple of 3, because we can't handle partial triangles
-    self.triAreaIds = table.create(#indicies // 3, 0)
+    --// We expect that the indices array's size is a multiple of 3, because we can't handle partial triangles
+    self.triAreaIds = table.create(math.floor(#indices / 3), 0)
 
-    for i = 1,#indicies // 3 do
+    for i = 1,math.floor(#indices / 3) do
         local vertIndex = (i) * 3 - 2
 
-        local p1 = verticies[indicies[vertIndex]]
-        local p2 = verticies[indicies[vertIndex + 1]]
-        local p3 = verticies[indicies[vertIndex + 2]]
+        local p1 = vertices[indices[vertIndex]]
+        local p2 = vertices[indices[vertIndex + 1]]
+        local p3 = vertices[indices[vertIndex + 2]]
 
         local normal = Geometry.calcTriNormal(p1, p2, p3)
         if normal.Y > self.walkableThreshold then
@@ -170,10 +179,10 @@ function NavigationMesh:clearWalkableTriangles()
     table.clear(self.triAreaIds)
 end
 
-function NavigationMesh:calculateBounds(verticies: Types.VertexArray, indicies: Types.IndexArray)
+function NavigationMesh:calculateBounds(vertices: Types.VertexArray, indices: Types.IndexArray)
     local self = self :: NavigationMesh
 
-    self.boundHigh, self.boundLow = Geometry.calcBounds(verticies)
+    self.boundHigh, self.boundLow = Geometry.calcBounds(vertices)
 
     self.heightFieldSize = Vector2.new(
         math.round((self.boundHigh.X - self.boundLow.X) / self.config.heightFieldCellSize),

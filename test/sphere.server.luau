@@ -1,14 +1,22 @@
+if true then return end
+
 local recast = require(script.Parent.Parent["recast-roblox"])
 local geometry = require(script.Parent.Parent["recast-roblox"].util.geometry)
-local gizmo = require(game.ReplicatedStorage.gizmo)
+local gizmo = require(script.Parent.Parent.packages.gizmo)
 
 local sphere = Instance.new("Part")
 sphere.Size = Vector3.one * 10
 sphere.Position = Vector3.new(0,20,0)
 sphere.Shape = Enum.PartType.Ball
+
+local beforeCalc = os.clock()
 local spherePoints,sphereInds = geometry.unwrapSphere(sphere)
 
-for i = 1,#sphereInds // 3 do
+local afterCalc = os.clock()
+
+print("Calculation time:",(afterCalc - beforeCalc) * 1000,"(ms)")
+
+for i = 1,math.floor(#sphereInds / 3) do
     local index = i * 3 - 2
 
     local p1 = spherePoints[sphereInds[index]]
@@ -28,15 +36,13 @@ for i = 1,#sphereInds // 3 do
     w2.Color = color
 end
 
-print(sphereInds)
-
 while task.wait() do
     for i,v in pairs(spherePoints) do
         gizmo.setColor(Color3.new(1,1,1))
         -- gizmo.drawSphere(CFrame.new(v),0.5)
         
         gizmo.setColor(Color3.new(0,0,0))
-        gizmo.setScale(10)
+        gizmo.setScale(2)
         gizmo.drawText(v, tostring(i))
     end
 end
