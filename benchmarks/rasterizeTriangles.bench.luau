@@ -54,15 +54,15 @@ local Parts: {BasePart} = {
 
 local vertices, indices = geometry.unwrap(Parts)
 
-mesh:calculateBounds(vertices, indices)
+mesh.heightField:calculateBounds(vertices, indices)
 
-mesh:markWalkableTriangles(vertices, indices)
+mesh.heightField:markWalkableTriangles(vertices, indices, mesh.walkableThreshold)
 
 return {
 	Functions = {
 		Rasterization = function(Profiler: Benchmarker.Profiler)
             Profiler.Begin("rasterize")
-            mesh:rasterizeTriangles(vertices, indices)
+            mesh.heightField:rasterizeTriangles(vertices, indices, mesh.config.heightFieldCellSize, mesh.config.heightFieldCellHeight, mesh.config.walkableStepHeight)
             Profiler.End()
         end,
 	},

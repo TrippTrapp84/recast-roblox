@@ -1,6 +1,7 @@
+local Types = require(script.types)
 local NavigationMesh = require(script["nav-mesh"])
 
-type NavigationMesh = NavigationMesh.NavigationMesh
+type NavigationMesh = Types.NavigationMesh
 
 local Recast = {}
 
