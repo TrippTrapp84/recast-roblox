@@ -2,9 +2,10 @@ if true then return end
 
 local navMesh = require(script.Parent.Parent["recast-roblox"]["nav-mesh"])
 local geometry = require(script.Parent.Parent["recast-roblox"].util.geometry)
+-- local gizmo = require(script.Parent.Parent.packages.gizmo)
 
 local mesh = navMesh.new({
-    heightFieldCellHeight = 0.1,
+    heightFieldCellHeight = 0.2,
     heightFieldCellSize = 0.5,
     walkableStepHeight = 1,
     walkableHeight = 5,
@@ -66,6 +67,19 @@ for i,v in pairs(mesh.spans) do
         currentSpan = currentSpan.next
     end
 end
+
+-- local camera = workspace.CurrentCamera
+
+-- while task.wait() do
+--     for i,v in pairs(spanBlocks) do
+--         if not v.span then continue end
+--         if (camera.CFrame.Position - v.block.Position - Vector3.new(0, v.block.Size.Y/2, 0)).Magnitude > 5 then continue end
+
+--         gizmo.setScale(2)
+--         gizmo.setColor(Color3.new(0,0,0))
+--         gizmo.drawText(v.block.Position + Vector3.new(0,v.block.Size.Y/2,0),`({v.span.min}, {v.span.max}), ({v.x}, {v.z})`)
+--     end
+-- end
 
 
 

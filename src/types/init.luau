@@ -29,7 +29,21 @@ export type IndexArray = {number}
 
 export type AreaId = number
 Types.AreaId = {
-   Walkable = 63
+   Walkable = 63,
+   Null = 0,
+}
+
+Types.DirectionX = {
+   -1,
+   0,
+   1,
+   0
+}
+Types.DirectionY = {
+   0,
+   1,
+   0,
+   -1
 }
 
 export type AxisId = "X" | "Y" | "Z"

@@ -1,4 +1,4 @@
-if true then return end
+if false then return end
 
 local navMesh = require(script.Parent.Parent["recast-roblox"]["nav-mesh"])
 local geometry = require(script.Parent.Parent["recast-roblox"].util.geometry)
@@ -6,8 +6,8 @@ local geometry = require(script.Parent.Parent["recast-roblox"].util.geometry)
 local mesh = navMesh.new({
     heightFieldCellHeight = 0.1,
     heightFieldCellSize = 0.5,
-    walkableStepHeight = 1,
-    walkableHeight = 5,
+    walkableStepHeight = 10,
+    walkableHeight = 20,
     walkableSlope = math.rad(60),
 })
 
@@ -18,6 +18,10 @@ mesh:calculateBounds(vertices, indices)
 mesh:markWalkableTriangles(vertices, indices)
 
 mesh:rasterizeTriangles(vertices, indices)
+
+mesh:filterLowHangingWalkableObstacles()
+mesh:filterLedgeSpans()
+mesh:filterWalkableLowHeightSpans()
 
 local tempBlock = Instance.new("Part")
 tempBlock.Anchored = true
@@ -53,6 +57,8 @@ for i,v in pairs(mesh.spans) do
             (currentSpan.max - currentSpan.min) * mesh.config.heightFieldCellHeight,
             mesh.config.heightFieldCellSize
         )
+
+        block.Name = `{x}, {z}`
 
         block.Parent = workspace
 

@@ -38,6 +38,9 @@ export type NavigationMesh = {
     addSpan: (self: NavigationMesh, x: number, z: number, spanMin: number, spanMax: number, areaId: AreaId) -> (),
     allocSpan: (self: NavigationMesh, areaId: AreaId, max: number, min: number) -> HeightFieldSpan,
     freeSpan: (self: NavigationMesh, span: HeightFieldSpan) -> (),
+    filterLowHangingWalkableObstacles: (self: NavigationMesh) -> (),
+    filterLedgeSpans: (self: NavigationMesh) -> (),
+    filterWalkableLowHeightSpans: (self: NavigationMesh) -> (),
 }
 export type NavigationMeshConfig = {
     walkableSlope: number,
@@ -63,6 +66,7 @@ function NavigationMesh.new(config: NavigationMeshConfig?): NavigationMesh
         heightFieldCellSize = 10,
         heightFieldCellHeight = 0.2,
         walkableStepHeight = 1,
+        agentRadius = 1,
         walkableHeight = 5,
     }
 
@@ -175,8 +179,8 @@ do
         local numColumn = 0
     
         currentTriangle[1] = p1
-        currentTriangle[2] = p1
-        currentTriangle[3] = p1
+        currentTriangle[2] = p2
+        currentTriangle[3] = p3
 
         for z = zMin, zMax do
             local cellZ = boundLow.Z + (z + 1) * cellSize
@@ -267,7 +271,7 @@ function NavigationMesh:addSpan(x: number, z: number, newSpanMin: number, newSpa
 
     local heightMergeThreshold = self.config.walkableStepHeight
     
-    local newSpan: HeightFieldSpan = self:allocSpan(areaId,newSpanMax,newSpanMin)
+    local newSpan: HeightFieldSpan = { areaId = areaId,max = newSpanMax,min = newSpanMin}
 
     local columnIndex = x + z * self.heightFieldSize.X + 1
     local currentSpan: HeightFieldSpan? = self.spans[columnIndex]
@@ -280,7 +284,7 @@ function NavigationMesh:addSpan(x: number, z: number, newSpanMin: number, newSpa
             previousSpan = currentSpan
             currentSpan = currentSpan.next
 
-            break
+            continue
         end
 
         if currentSpan.min < newSpan.min then
@@ -297,7 +301,7 @@ function NavigationMesh:addSpan(x: number, z: number, newSpanMin: number, newSpa
 
         --// TODO: Implement object pooling for spans, this is easily reusable memory. Right now we leave freeing to the gc and just construct new spans every time
         local nextSpan = currentSpan.next
-        self:freeSpan(currentSpan)
+        -- self:freeSpan(currentSpan)
 
         if previousSpan then
             previousSpan.next = nextSpan
@@ -314,6 +318,151 @@ function NavigationMesh:addSpan(x: number, z: number, newSpanMin: number, newSpa
     else
         newSpan.next = self.spans[columnIndex]
         self.spans[columnIndex] = newSpan
+    end
+end
+
+function NavigationMesh:filterLowHangingWalkableObstacles()
+    local self = self :: NavigationMesh
+    
+    local rowSize = self.heightFieldSize.X
+    local walkableStepHeight = self.config.walkableStepHeight
+    
+    for z = 0,self.heightFieldSize.Z-1 do
+        --// We normally have to do +1 to our indicies to make the math for these work out since recast is in C++ originally,
+        --// but instead I have x starting and ending 1 later to compensate.
+        for x = 1,self.heightFieldSize.X do
+            local previousSpan: HeightFieldSpan? = self.spans[x + z * rowSize]
+            if not previousSpan then continue end
+
+            local currentSpan = previousSpan.next
+
+            local previousWalkable = false
+
+            while currentSpan do
+                local walkable = currentSpan.areaId ~= AreaId.Null
+
+                if (not walkable) and previousWalkable and (currentSpan.max - previousSpan.max < walkableStepHeight) then
+                    currentSpan.areaId = previousSpan.areaId
+                end
+
+                previousWalkable = walkable
+                
+                previousSpan = currentSpan
+                currentSpan = currentSpan.next
+            end
+        end
+    end
+end
+
+function NavigationMesh:filterLedgeSpans()
+    local self = self :: NavigationMesh
+
+    local hSize = self.heightFieldSize
+    local walkableStepHeight = self.config.walkableStepHeight / self.config.heightFieldCellHeight
+
+    for z = 0,hSize.Z-1 do
+        for x = 0, hSize.X do
+            local currentSpan = self.spans[x + z * hSize.X + 1]
+
+            while currentSpan do
+                if currentSpan.areaId == AreaId.Null then
+                    currentSpan = currentSpan.next
+                    continue
+                end
+
+                local floor = currentSpan.max
+                local ceiling = math.huge
+                if currentSpan.next then
+                    ceiling = currentSpan.next.min
+                end
+
+                local lowestNeighborFloorDifference = math.huge
+                local lowestTraversableNeighborFloor = currentSpan.max
+                local highestTraversableNeighborFloor = currentSpan.max
+
+                for direction = 1,4 do
+                    local neighborX = x + Types.DirectionX[direction]
+                    local neighborZ = z + Types.DirectionY[direction]
+
+                    if neighborX < 0 or  neighborZ < 0 or neighborX >= hSize.X or neighborZ >= hSize.Z then
+                        lowestNeighborFloorDifference = -walkableStepHeight - 1
+                        break
+                    end
+
+                    local neighborSpan = self.spans[neighborX + neighborZ * hSize.X + 1]
+                    if not neighborSpan then
+                        lowestNeighborFloorDifference = -walkableStepHeight - 1
+                        break
+                    end
+
+                    local neighborCeiling = neighborSpan.min
+
+                    if math.min(ceiling, neighborCeiling) - floor > walkableStepHeight then
+                        lowestNeighborFloorDifference = -walkableStepHeight - 1
+                        break
+                    end
+
+                    while neighborSpan do
+                        local nextNeighborSpan = neighborSpan.next
+
+                        local neighborFloor = neighborSpan.max
+                        neighborCeiling = if nextNeighborSpan then nextNeighborSpan.min else math.huge
+
+                        if math.min(ceiling, neighborCeiling) - math.max(floor, neighborFloor) < walkableStepHeight then
+                            neighborSpan = neighborSpan.next
+                            continue
+                        end
+
+                        local neighborFloorDistance = neighborFloor - floor
+                        lowestNeighborFloorDifference = math.min(lowestNeighborFloorDifference, neighborFloorDistance)
+
+                        if math.abs(neighborFloorDistance) <= walkableStepHeight then
+                            lowestTraversableNeighborFloor = math.min(lowestTraversableNeighborFloor, neighborFloor)
+                            highestTraversableNeighborFloor = math.min(highestTraversableNeighborFloor, neighborFloor)
+                        elseif neighborFloorDistance < -walkableStepHeight then
+                            break
+                        end
+
+                        neighborSpan = neighborSpan.next
+                    end
+                end
+
+                if lowestNeighborFloorDifference < -walkableStepHeight then
+                    currentSpan.areaId = AreaId.Null
+                elseif highestTraversableNeighborFloor - lowestTraversableNeighborFloor > walkableStepHeight then
+                    currentSpan.areaId = AreaId.Null
+                end
+                
+                currentSpan = currentSpan.next
+            end
+        end
+    end
+end
+
+function NavigationMesh:filterWalkableLowHeightSpans()
+    local self = self :: NavigationMesh
+
+    local hSize = self.heightFieldSize
+    local walkableHeight = self.config.walkableHeight / self.config.heightFieldCellHeight
+
+    for z = 0, hSize.Z - 1 do
+        for x = 0, hSize.Z - 1 do
+            local currentSpan = self.spans[x + z * hSize.X + 1]
+
+            while currentSpan do
+                local nextSpan = currentSpan.next
+                if not nextSpan then
+                    currentSpan = currentSpan.next
+                    continue
+                end
+
+                if nextSpan.min - currentSpan.max < walkableHeight then
+                    currentSpan.areaId = AreaId.Null
+                end
+
+                currentSpan = currentSpan.next
+            end
+        end
     end
 end
 
