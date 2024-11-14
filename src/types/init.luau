@@ -28,6 +28,10 @@ export type VertexArray = {Vector3}
 export type IndexArray = {number}
 
 export type AreaId = number
+Types.AreaId = {
+   Walkable = 63
+}
+
 export type AxisId = "X" | "Y" | "Z"
 
 return Types

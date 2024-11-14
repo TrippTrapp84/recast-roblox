@@ -22,8 +22,8 @@ local RunService = game:GetService("RunService")
 local Event = RunService:IsServer() and RunService.Heartbeat or RunService.RenderStepped
 local Gizmos = Instance.new("Folder", workspace)
 
-local thickness = script:GetAttribute("DefaultThickness")
-local globalScale = script:GetAttribute("DefaultScale")
+local thickness = script:GetAttribute("DefaultThickness") or 0.025
+local globalScale = script:GetAttribute("DefaultScale") or 1
 local globalOrigin = CFrame.new(0, 0, 0)
 local onRender = nil
 local cache = {}
@@ -40,7 +40,7 @@ local properties = {
 	AlwaysOnTop = true,
 	AdornCullingMode = Enum.AdornCullingMode.Automatic,
 	Transparency = 0,
-	Color3 = script:GetAttribute("DefaultColor"),
+	Color3 = script:GetAttribute("DefaultColor") or Color3.new(1,1,1),
 	Visible = false,
 	ZIndex = 1,
 }

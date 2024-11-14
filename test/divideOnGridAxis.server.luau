@@ -1,6 +1,5 @@
 if true then return end
 
-local recast = require(script.Parent.Parent["recast-roblox"])
 local geometry = require(script.Parent.Parent["recast-roblox"].util.geometry)
 local gizmo = require(script.Parent.Parent.packages.gizmo)
 
@@ -17,7 +16,7 @@ local polyInside = table.create(21)
 local polyOutside = table.create(21)
 
 task.spawn(function()
-    geometry.dividePolygonOnGridAxis(points, "X", av.X, polyInside, polyOutside)
+    geometry.dividePolygonOnGridAxis(points, #points, "X", av.X, polyInside, polyOutside)
 end)
 
 task.spawn(function()
@@ -38,13 +37,17 @@ local inParts = geometry.generatePolygon(polyInside, geometry.makeGuaranteedInde
 local outParts = geometry.generatePolygon(polyOutside, geometry.makeGuaranteedIndexArray(polyOutside))
 
 for i,v in pairs(inParts) do
-    v.Parent = workspace
-    v.Transparency = 0
-    v.Color = Color3.new(0,1,0)
+    for _,p in pairs(v) do
+        p.Parent = workspace
+        p.Transparency = 0
+        p.Color = Color3.new(0,1,0) 
+    end
 end
 
 for i,v in pairs(outParts) do
-    v.Parent = workspace
-    v.Transparency = 0
-    v.Color = Color3.new(1,0,0)
+    for _,p in pairs(v) do
+        p.Parent = workspace
+        p.Transparency = 0
+        p.Color = Color3.new(1,0,0) 
+    end
 end

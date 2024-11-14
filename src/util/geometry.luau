@@ -3,7 +3,7 @@ local Types = require(Root.types)
 
 local GOLDEN_RATIO = 1.618033988749895
 
-local sphereTesselationResolution = 4
+local sphereTesselationResolution = 2
 local sphereCoordinateLookupvertices: Types.VertexArray, sphereCoordinateLookupindices: Types.IndexArray = {}, {}
 
 --[=[
@@ -60,7 +60,7 @@ function Geometry.generateTriangle(p1: Vector3, p2: Vector3, p3: Vector3): (Part
 	return Part1, Part2
 end
 
-function Geometry.generatePolygon(vertices: Types.VertexArray, indices: Types.IndexArray): {Part}
+function Geometry.generatePolygon(vertices: Types.VertexArray, indices: Types.IndexArray): {{w1: Part, w2: Part}}
     local parts = table.create(math.floor(#indices / 3) * 2)
     
     for i = 1,math.floor(#indices / 3) do
@@ -71,8 +71,7 @@ function Geometry.generatePolygon(vertices: Types.VertexArray, indices: Types.In
         local p3 = vertices[indices[index + 2]]
 
         local w1, w2 = Geometry.generateTriangle(p1, p2, p3)
-        table.insert(parts,w1)
-        table.insert(parts,w2)
+        table.insert(parts,{w1 = w1, w2 = w2})
     end
 
     return parts
@@ -150,53 +149,78 @@ end
 
 --[=[
     @param vertices VertexArray -- The vertices to divide along the grid axis.
+    @param vertNum number -- The number of vertices to use in the `vertices` array.
     @param axis AxisId -- The grid axis to divide on. This is a grid axis for performance reasons, see `dividePolygonOnAxis` for a more general option.
     @param offset number -- The offset of the axis from the world origin. Think of this as the distance from the origin to the closest point on the axis plane.
     @param outPoly1 VertexArray -- An output destination for the verticies on the positive distance side of the axis. It is recommended to allocate a table of size `21` for this.
     @param outPoly2 VertexArray -- An output destination for the verticies on the negative distance side of the axis. It is recommended to allocate a table of size `21` for this.
+
+    @return (number, number) -- The number of vertices pushed to `outPoly1` and `outPoly2` respectively.
+
+    Be aware this will *not* clear your out tables, and will overwrite your data currently in those tables.
 ]=]
-function Geometry.dividePolygonOnGridAxis(vertices: Types.VertexArray, axis: Types.AxisId, offset: number, outPoly1: Types.VertexArray, outPoly2: Types.VertexArray)
-    --// So I did actually benchmark this, using this outvar system is actually faster because lets you reuse the existing memory, the allocations along trigger a whole
-    --// Host of garbage collection and cache misses. Weird to see in lua? Fair enough, but it's still more performant.
+function Geometry.dividePolygonOnGridAxis(vertices: Types.VertexArray, vertNum: number, axis: Types.AxisId, offset: number, outPoly1: Types.VertexArray, outPoly2: Types.VertexArray): (number,number)
+    --// So I did actually benchmark this, using this outvar system is actually faster because it lets you reuse the existing memory, the allocations alone trigger a whole
+    --// host of garbage collection and cache misses. Weird to see in lua? Fair enough, but it's still more performant.
 
-    local deltas: {number} = table.create(#vertices)
+    local deltas: {number} = table.create(vertNum)
 
-    for i,v in ipairs(vertices) do
-        --// Yeah this typecast stupidity is dumb but I do it to avoid linting errors. The correct line would be:
-        --// deltas[i] = offset - v[axis]
-        deltas[i] = offset - ((v :: never) :: {})[axis:: never]
+    local poly1Ind = 1
+    local poly2Ind = 1
+
+    for i = 1, vertNum do
+        local v = vertices[i]
+
+        local axisValue
+        if axis == "X" then
+            axisValue = v.X
+        elseif axis == "Y" then
+            axisValue = v.Y
+        else
+            axisValue = v.Z
+        end
+        deltas[i] = offset - axisValue
     end
 
-    local vertex2Ind = #vertices
-    for vertex1Ind, vertex1 in ipairs(vertices) do
+    local vertex2Ind = vertNum
+    for vertex1Ind = 1, vertNum do
+        local vertex1 = vertices[vertex1Ind]
         local sameSide = (deltas[vertex1Ind] >= 0) == (deltas[vertex2Ind] >= 0)
 
         if sameSide then
             vertex2Ind = vertex1Ind
 
             if deltas[vertex1Ind] >= 0 then
-                table.insert(outPoly1,vertex1)
+                outPoly1[poly1Ind] = vertex1
+                poly1Ind += 1
                 if deltas[vertex1Ind] ~= 0 then continue end
             end
 
-            table.insert(outPoly2,vertex1)
+            outPoly2[poly2Ind] = vertex1
+            poly2Ind += 1
         else
             local vertex2 = vertices[vertex2Ind]
 
             local s = deltas[vertex2Ind] / (deltas[vertex2Ind] - deltas[vertex1Ind])
             local outVert = vertex2 + (vertex1 - vertex2) * s
-            table.insert(outPoly1,outVert)
-            table.insert(outPoly2,outVert)
+            outPoly1[poly1Ind] = outVert
+            poly1Ind += 1
+            outPoly2[poly2Ind] = outVert
+            poly2Ind += 1
 
             if deltas[vertex1Ind] > 0 then
-                table.insert(outPoly1,vertex1)
+                outPoly1[poly1Ind] = vertex1
+                poly1Ind += 1
             elseif deltas[vertex1Ind] < 0 then
-                table.insert(outPoly2,vertex1)
+                outPoly2[poly2Ind] = vertex1
+                poly2Ind += 1
             end
 
             vertex2Ind = vertex1Ind
         end
     end
+
+    return poly1Ind-1, poly2Ind-1
 end
 
 --[=[
@@ -208,28 +232,27 @@ end
     mutate data another part of your program depended on
 ]=]
 function Geometry.optimizeArrayPair(vertices: Types.VertexArray, indices: Types.IndexArray)
-    local indexRemap = {}
-
     local vertsSet = {}
     local verts = {}
     for i,v in pairs(vertices) do
         if vertsSet[v] then continue end
-
+        
         vertsSet[v] = #verts + 1
         table.insert(verts,v)
     end
-
+    
     for i,v in pairs(indices) do
         local vert = vertices[indices[v]]
         indices[i] = vertsSet[vert]
     end
-
+    
     table.clear(vertices)
     table.move(verts, 1, #verts, 1,vertices)
     
     --// I will come back to reimplement this for performance reasons, but right now
     --// I cannot make this code function without destroying the mesh data.
-
+    
+    -- local indexRemap = {}
     -- for i = #vertices, 2, -1 do
     --     local iVert = vertices[i]
         
@@ -352,8 +375,11 @@ function Geometry.unwrap(parts: {BasePart}): (Types.VertexArray,Types.IndexArray
     for i,v in pairs(parts) do
         local verts, inds = Geometry.unwrapPart(v)
 
+        local vertsOffset = #vertices
+        for _,index in pairs(inds) do
+            table.insert(indices,index + vertsOffset)
+        end
         table.move(verts,1,#verts,#vertices+1,vertices)
-        table.move(inds,1,#inds,#indices+1,indices)
     end
 
     return vertices, indices
@@ -385,7 +411,7 @@ end
 function Geometry.unwrapSphere(part: Part): (Types.VertexArray,Types.IndexArray)
     local verts, inds = table.clone(sphereCoordinateLookupvertices), table.clone(sphereCoordinateLookupindices)
 
-    local size = part.Size
+    local size = part.Size/2
     local radius = math.min(size.X,size.Y,size.Z)
 
     for i,v in ipairs(verts) do
@@ -396,7 +422,45 @@ function Geometry.unwrapSphere(part: Part): (Types.VertexArray,Types.IndexArray)
 end
 
 function Geometry.unwrapBlock(part: Part): (Types.VertexArray,Types.IndexArray)
+    local size = part.Size / 2
+    local position = part.Position
+    local cf = part.CFrame
+    local xVector = cf.XVector * size.X
+    local yVector = cf.YVector * size.Y
+    local zVector = cf.LookVector * size.Z
     
+    local vertices = {
+        xVector + yVector + zVector + position, --// 1
+        -xVector + yVector + zVector + position, --// 2
+        -xVector - yVector + zVector + position, --// 3
+        xVector - yVector + zVector + position, --// 4
+        xVector + yVector - zVector + position, --// 5
+        -xVector + yVector - zVector + position, --// 6
+        -xVector - yVector - zVector + position, --// 7
+        xVector - yVector - zVector + position, --// 8
+    }
+    
+    local indices = {
+        --// front-back faces
+        2,1,4,
+        4,3,2,
+        5,6,7,
+        7,8,5,
+
+        --// left-right faces
+        1,5,8,
+        8,4,1,
+        6,2,3,
+        3,7,6,
+
+        --// top-bottom faces
+        2,6,5,
+        5,1,2,
+        8,7,3,
+        3,4,8,
+    }
+
+    return vertices, indices
 end
 
 function Geometry.unwrapCylinder(part: Part): (Types.VertexArray,Types.IndexArray)
@@ -404,7 +468,44 @@ function Geometry.unwrapCylinder(part: Part): (Types.VertexArray,Types.IndexArra
 end
 
 function Geometry.unwrapWedge(part: Part): (Types.VertexArray,Types.IndexArray)
+    local size = part.Size / 2
+    local position = part.Position
+    local cf = part.CFrame
+    local xVector = cf.XVector * size.X
+    local yVector = cf.YVector * size.Y
+    local zVector = cf.LookVector * size.Z
     
+    local vertices = {
+        --// slope end vertices
+        xVector - yVector + zVector + position, --// 1
+        -xVector - yVector + zVector + position, --// 2
+
+        --// slope start vertices
+        xVector + yVector - zVector + position, --// 3
+        xVector - yVector - zVector + position, --// 4
+        -xVector - yVector - zVector + position, --// 5
+        -xVector + yVector - zVector + position, --// 6
+    }
+    
+    local indices = {
+        --// slope faces
+        6,3,1,
+        1,2,6,
+
+        --// side faces
+        3,4,1,
+        5,6,2,
+
+        --// back faces
+        6,5,4,
+        4,3,6,
+
+        --// bottom faces
+        4,5,2,
+        2,1,4,
+    }
+
+    return vertices, indices
 end
 
 function Geometry.unwrapCornerWedge(part: Part): (Types.VertexArray,Types.IndexArray)
@@ -432,28 +533,28 @@ do
         Vector3.new(-0.5, 0, -halfGolden), -- 12
     },{
         --// Middle Faces
-        1,5,7,
-        2,7,5,
-        3,8,6,
-        4,6,8,
-        5,9,10,
-        6,10,9,
-        7,12,11,
-        8,11,12,
-        9,1,3,
-        10,4,2,
-        11,3,1,
-        12,2,4,
+        7,5,1,
+        5,7,2,
+        6,8,3,
+        8,6,4,
+        10,9,5,
+        9,10,6,
+        11,12,7,
+        12,11,8,
+        3,1,9,
+        2,4,10,
+        1,3,11,
+        4,2,12,
 
         --// Corner Faces
-        1,9,5,
-        1,7,11,
-        2,12,7,
-        2,5,10,
-        3,11,8,
-        3,6,9,
-        4,10,6,
-        4,8,12
+        5,9,1,
+        11,7,1,
+        7,12,2,
+        10,5,2,
+        8,11,3,
+        9,6,3,
+        6,10,4,
+        12,8,4
     }
 
     local verts: Types.VertexArray, inds: Types.IndexArray = {}, {}
