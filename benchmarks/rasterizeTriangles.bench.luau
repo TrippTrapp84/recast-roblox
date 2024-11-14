@@ -54,7 +54,7 @@ local Parts: {BasePart} = {
 
 local vertices, indices = geometry.unwrap(Parts)
 
-mesh.heightField:calculateBounds(vertices, indices)
+mesh.heightField:calculateBounds(vertices, indices,mesh.config.heightFieldCellSize)
 
 mesh.heightField:markWalkableTriangles(vertices, indices, mesh.walkableThreshold)
 
